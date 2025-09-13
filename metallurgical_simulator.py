@@ -785,6 +785,166 @@ with col3:
     st.metric("Total Plant Value", f"${total_value_per_hour:,.0f}/hour")
     st.metric("Daily Revenue", f"${total_value_per_hour * 24:,.0f}/day")
 
+# Material Flow Warnings and Bottleneck Analysis
+if plant.material_flow_warnings or plant.bottlenecks:
+    st.subheader("⚠️ Material Flow Analysis")
+    
+    # Material Flow Warnings
+    if plant.material_flow_warnings:
+        st.error("**Material Flow Warnings Detected:**")
+        
+        for warning in plant.material_flow_warnings:
+            severity_color = {
+                'Critical': '🔴',
+                'High': '🟠', 
+                'Moderate': '🟡'
+            }.get(warning['severity'], '🔵')
+            
+            with st.expander(f"{severity_color} {warning['severity']} - {warning['process_type'].title()} {warning['stage']} Capacity Issue"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Required Material", f"{warning['required_mass']:.1f} t/h")
+                    st.metric("Available Material", f"{warning['available_mass']:.1f} t/h")
+                with col2:
+                    st.metric("Material Shortage", f"{warning['shortage']:.1f} t/h")
+                    st.metric("Shortage Percentage", f"{warning['shortage_percent']:.1f}%")
+                with col3:
+                    st.write("**Recommended Actions:**")
+                    if warning['shortage_percent'] > 50:
+                        st.write("- 🔧 Immediate equipment upgrade required")
+                        st.write("- ⚡ Consider parallel processing units")
+                        st.write("- 📉 Reduce upstream feed rate")
+                    elif warning['shortage_percent'] > 25:
+                        st.write("- 🔧 Schedule equipment maintenance")
+                        st.write("- ⚙️ Optimize process parameters")
+                        st.write("- 📊 Monitor closely for deterioration")
+                    else:
+                        st.write("- 👀 Monitor process performance")
+                        st.write("- 🛠️ Plan preventive maintenance")
+    
+    # Process Bottlenecks
+    if plant.bottlenecks:
+        st.warning("**Process Bottlenecks Identified:**")
+        
+        for bottleneck in plant.bottlenecks:
+            with st.expander(f"🚧 {bottleneck['process']} Process - {bottleneck['stage'].title()} Bottleneck"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Limiting Throughput", f"{bottleneck['limiting_throughput']:.1f} t/h")
+                    if 'upstream_capacity' in bottleneck:
+                        st.metric("Upstream Capacity", f"{bottleneck['upstream_capacity']:.1f} t/h")
+                    else:
+                        st.metric("Feed Rate", f"{bottleneck['feed_rate']:.1f} t/h")
+                with col2:
+                    st.metric("Efficiency Loss", f"{bottleneck['efficiency_loss']:.1f}%")
+                    potential_gain = bottleneck.get('upstream_capacity', bottleneck.get('feed_rate', 0)) - bottleneck['limiting_throughput']
+                    st.metric("Potential Throughput Gain", f"{potential_gain:.1f} t/h")
+                with col3:
+                    st.write("**Optimization Opportunities:**")
+                    if bottleneck['stage'] == 'grinding':
+                        st.write("- ⚙️ Increase mill capacity")
+                        st.write("- 🔧 Optimize grinding parameters")
+                        st.write("- 📈 Add parallel grinding circuit")
+                    elif bottleneck['stage'] == 'flotation':
+                        st.write("- 🧪 Optimize reagent dosing")
+                        st.write("- ⏱️ Increase flotation residence time")
+                        st.write("- 🔄 Add flotation cells")
+                    else:
+                        st.write("- 🔧 Equipment capacity upgrade")
+                        st.write("- ⚙️ Process parameter optimization")
+                        st.write("- 📊 Operational efficiency improvement")
+
+# Capacity Utilization Analysis
+if 'oxide' in plant.stage_results or 'sulphide' in plant.stage_results:
+    st.subheader("📊 Equipment Capacity Utilization")
+    
+    capacity_data = []
+    
+    if 'oxide' in plant.stage_results:
+        oxide_stages = plant.stage_results['oxide']
+        
+        # Calculate capacity utilization for each oxide stage
+        for stage_name, stage_data in oxide_stages.items():
+            if 'capacity' in stage_data and stage_name != 'feed':
+                utilization = (stage_data['mass'] / stage_data['capacity']) * 100
+                capacity_data.append({
+                    'Process': 'Oxide',
+                    'Stage': stage_name.title(),
+                    'Actual Throughput (t/h)': stage_data['mass'],
+                    'Design Capacity (t/h)': stage_data['capacity'],
+                    'Utilization (%)': utilization,
+                    'Available Capacity (t/h)': stage_data['capacity'] - stage_data['mass'],
+                    'Status': 'Overloaded' if utilization > 100 else 'Critical' if utilization > 90 else 'Normal'
+                })
+    
+    if 'sulphide' in plant.stage_results:
+        sulphide_stages = plant.stage_results['sulphide']
+        
+        # Calculate capacity utilization for each sulphide stage
+        for stage_name, stage_data in sulphide_stages.items():
+            if 'capacity' in stage_data and stage_name != 'feed':
+                if stage_name in ['cu_flotation', 'ni_flotation']:
+                    throughput = stage_data['concentrate_mass']
+                else:
+                    throughput = stage_data['mass']
+                    
+                utilization = (throughput / stage_data['capacity']) * 100
+                capacity_data.append({
+                    'Process': 'Sulphide',
+                    'Stage': stage_name.replace('_', ' ').title(),
+                    'Actual Throughput (t/h)': throughput,
+                    'Design Capacity (t/h)': stage_data['capacity'],
+                    'Utilization (%)': utilization,
+                    'Available Capacity (t/h)': stage_data['capacity'] - throughput,
+                    'Status': 'Overloaded' if utilization > 100 else 'Critical' if utilization > 90 else 'Normal'
+                })
+    
+    if capacity_data:
+        capacity_df = pd.DataFrame(capacity_data)
+        
+        # Color code the dataframe based on status
+        def color_status(val):
+            if val == 'Overloaded':
+                return 'background-color: #ffebee; color: #c62828'
+            elif val == 'Critical':
+                return 'background-color: #fff3e0; color: #ef6c00'
+            else:
+                return 'background-color: #e8f5e8; color: #2e7d32'
+        
+        styled_df = capacity_df.style.applymap(color_status, subset=['Status'])
+        st.dataframe(styled_df, use_container_width=True)
+        
+        # Capacity utilization chart
+        fig_capacity = px.bar(capacity_df, x='Stage', y='Utilization (%)', 
+                             color='Process', barmode='group',
+                             title="Equipment Capacity Utilization by Stage")
+        fig_capacity.add_hline(y=100, line_dash="dash", line_color="red", 
+                              annotation_text="Maximum Capacity")
+        fig_capacity.add_hline(y=90, line_dash="dash", line_color="orange", 
+                              annotation_text="Critical Threshold (90%)")
+        st.plotly_chart(fig_capacity, use_container_width=True)
+        
+        # Summary metrics
+        st.write("**Capacity Utilization Summary:**")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            avg_utilization = capacity_df['Utilization (%)'].mean()
+            st.metric("Average Utilization", f"{avg_utilization:.1f}%")
+        with col2:
+            overloaded_count = len(capacity_df[capacity_df['Status'] == 'Overloaded'])
+            st.metric("Overloaded Stages", f"{overloaded_count}")
+        with col3:
+            critical_count = len(capacity_df[capacity_df['Status'] == 'Critical'])
+            st.metric("Critical Stages", f"{critical_count}")
+        with col4:
+            total_spare_capacity = capacity_df['Available Capacity (t/h)'].sum()
+            st.metric("Total Spare Capacity", f"{total_spare_capacity:.1f} t/h")
+
+else:
+    # Success message when no issues detected
+    st.success("✅ **Material Flow Validation: All Clear**")
+    st.write("No material flow warnings or bottlenecks detected. All process stages have sufficient capacity to handle current throughput rates.")
+
 # Multi-Scenario Analysis & Risk Assessment
 st.subheader("🎯 Multi-Scenario Analysis & Risk Assessment")
 
